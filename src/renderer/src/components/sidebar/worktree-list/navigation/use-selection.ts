@@ -1,7 +1,11 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type React from 'react'
 import type { Worktree } from '../../../../../../shared/worktree/types'
-import { getWorktreeHostIdentity } from '../../../../../../shared/worktree/host-qualified-identity'
+import type { ExecutionHostId } from '../../../../../../shared/execution-host'
+import {
+  composeWorktreeHostIdentity,
+  getWorktreeHostIdentity
+} from '../../../../../../shared/worktree/host-qualified-identity'
 import type { HostSectionRow } from '../../host-section-rows'
 import type { PinnedWorktreeDisplayPolicy } from '../grouping/row-types'
 import { getRenderedWorktreesInSidebarOrder } from '../../worktree-sidebar-row-preference'
@@ -19,8 +23,11 @@ import { useReusedArrayIdentity } from '../listing/use-reused-array-identity'
 export function useSidebarWorktreeSelection(args: {
   sectionRows: HostSectionRow[]
   pinnedDisplayPolicy: PinnedWorktreeDisplayPolicy
+  activeWorktreeId: string | null
+  activeWorkspaceExecutionHostId: ExecutionHostId | null
 }) {
-  const { sectionRows, pinnedDisplayPolicy } = args
+  const { sectionRows, pinnedDisplayPolicy, activeWorktreeId, activeWorkspaceExecutionHostId } =
+    args
   // Why: derive order from the built rows, not the flat worktrees array, so Cmd+1–9 match visual positions when grouping reorders cards.
   const renderedWorktrees = useMemo(
     () => getRenderedWorktreesInSidebarOrder(sectionRows, pinnedDisplayPolicy),
@@ -75,6 +82,44 @@ export function useSidebarWorktreeSelection(args: {
       return Array.from(selected.values())
     }, [renderedWorktrees, selectedWorktreeIds])
   )
+
+  // Resolved the way cycling resolves it, so a host-unqualified activation lands on the
+  // same identity the rows carry.
+  const activeIdentity = useMemo(() => {
+    if (!activeWorktreeId) {
+      return null
+    }
+    if (activeWorkspaceExecutionHostId) {
+      return composeWorktreeHostIdentity(activeWorkspaceExecutionHostId, activeWorktreeId)
+    }
+    const activeWorktree = renderedWorktrees.find((worktree) => worktree.id === activeWorktreeId)
+    return activeWorktree ? getWorktreeHostIdentity(activeWorktree) : null
+  }, [activeWorktreeId, activeWorkspaceExecutionHostId, renderedWorktrees])
+
+  const lastSyncedActiveIdentity = useRef<string | null>(null)
+  // Why this exists: only mouse gestures ever wrote the selection, so activating a workspace
+  // any other way (keyboard cycling, Cmd+digit, the palette, history) left the ring on the
+  // card the user last clicked. A plain click activates *and* replaces the selection; every
+  // other activation now agrees with it.
+  //
+  // Why a layout effect: an effect after paint would show the previous card's ring for a frame.
+  useLayoutEffect(() => {
+    const previousIdentity = lastSyncedActiveIdentity.current
+    lastSyncedActiveIdentity.current = activeIdentity
+    // Why the first observation is skipped: startup activates a workspace without the user
+    // selecting anything, and inventing a selection there would arm Cmd+click from a card
+    // nobody picked. Only a real move republishes the selection.
+    if (previousIdentity === null || previousIdentity === activeIdentity || !activeIdentity) {
+      return
+    }
+    // Identity-preserving when it already matches, so a plain click does not re-render twice.
+    setSelectedWorktreeIds((previousSelection) =>
+      previousSelection.size === 1 && previousSelection.has(activeIdentity)
+        ? previousSelection
+        : new Set([activeIdentity])
+    )
+    setSelectionAnchorId(activeIdentity)
+  }, [activeIdentity])
 
   useEffect(() => {
     if (selectedWorktreeIds.size === 0) {
