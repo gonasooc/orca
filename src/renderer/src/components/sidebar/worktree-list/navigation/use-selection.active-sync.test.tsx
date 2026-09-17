@@ -177,6 +177,45 @@ describe('sidebar selection follows a non-gesture activation', () => {
     expect(selection.selectedWorktreeIds).toEqual(new Set(['ssh:host-b|shared']))
   })
 
+  it('still publishes after the active workspace was hidden from the rows', () => {
+    // Collapsing a group or filtering the list drops the active workspace from the rows, so the
+    // identity resolves to null. The next activation still has to move the ring.
+    const hidden = worktree('h')
+    const picked = worktree('v')
+    const target = worktree('w')
+    const all = [row(hidden), row(picked), row(target)]
+    const withoutHidden = [row(picked), row(target)]
+
+    renderUnqualifiedProbe(all, 'h', 'local')
+    // A modifier gesture leaves the ring on a card that is not the active one.
+    act(() => selection.updateSelectionForGesture(additiveEvent, picked))
+    expect(selection.selectedWorktreeIds).toEqual(new Set(['local|v']))
+
+    // The active workspace drops out of the rows, so its identity resolves to null.
+    renderUnqualifiedProbe(withoutHidden, 'h', 'local')
+    // The next activation must still move the ring off the picked card.
+    renderUnqualifiedProbe(withoutHidden, 'w', 'local')
+
+    expect(selection.selectedWorktreeIds).toEqual(new Set(['local|w']))
+  })
+
+  it('does not republish when a hidden row simply comes back', () => {
+    // Clearing a filter or expanding a group is not an activation, so a selection the user
+    // built deliberately has to survive the active row reappearing.
+    const hidden = worktree('h')
+    const picked = worktree('v')
+    const all = [row(hidden), row(picked)]
+    const withoutHidden = [row(picked)]
+
+    renderUnqualifiedProbe(all, 'h', 'local')
+    act(() => selection.updateSelectionForGesture(additiveEvent, picked))
+    renderUnqualifiedProbe(withoutHidden, 'h', 'local')
+
+    renderUnqualifiedProbe(all, 'h', 'local')
+
+    expect(selection.selectedWorktreeIds).toEqual(new Set(['local|v']))
+  })
+
   it('resolves a host-unqualified activation through the rendered rows', () => {
     renderProbe('a', null)
     act(() => selection.updateSelectionForGesture(additiveEvent, first))

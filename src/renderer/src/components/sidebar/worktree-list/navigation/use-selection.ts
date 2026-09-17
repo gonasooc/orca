@@ -107,7 +107,13 @@ export function useSidebarWorktreeSelection(args: {
     renderedWorktrees
   ])
 
-  const lastSyncedActiveIdentity = useRef<string | null>(null)
+  // Keyed on what the store activated rather than on the resolved identity: the identity also
+  // goes null when a filter or a collapsed group hides the active row, and a null there must
+  // not read as "nothing has been activated yet".
+  const activationKey = activeWorktreeId
+    ? composeWorktreeHostIdentity(activeWorkspaceExecutionHostId ?? undefined, activeWorktreeId)
+    : null
+  const publishedActivation = useRef<string | null | undefined>(undefined)
   // Why this exists: only mouse gestures ever wrote the selection, so activating a workspace
   // any other way (keyboard cycling, Cmd+digit, the palette, history) left the ring on the
   // card the user last clicked. A plain click activates *and* replaces the selection; every
@@ -115,14 +121,19 @@ export function useSidebarWorktreeSelection(args: {
   //
   // Why a layout effect: an effect after paint would show the previous card's ring for a frame.
   useLayoutEffect(() => {
-    const previousIdentity = lastSyncedActiveIdentity.current
-    lastSyncedActiveIdentity.current = activeIdentity
-    // Why the first observation is skipped: startup activates a workspace without the user
-    // selecting anything, and inventing a selection there would arm Cmd+click from a card
-    // nobody picked. Only a real move republishes the selection.
-    if (previousIdentity === null || previousIdentity === activeIdentity || !activeIdentity) {
+    if (publishedActivation.current === undefined) {
+      // Startup activates a workspace without the user picking anything, and inventing a
+      // selection there would arm Cmd+click from a card nobody touched.
+      publishedActivation.current = activationKey
       return
     }
+    // An activation whose row is not rendered yet stays unpublished, so it still lands once
+    // the row appears; a row appearing on its own publishes nothing, because the key is
+    // unchanged and a filter is not an activation.
+    if (publishedActivation.current === activationKey || !activeIdentity) {
+      return
+    }
+    publishedActivation.current = activationKey
     // Identity-preserving when it already matches, so a plain click does not re-render twice.
     setSelectedWorktreeIds((previousSelection) =>
       previousSelection.size === 1 && previousSelection.has(activeIdentity)
@@ -130,7 +141,7 @@ export function useSidebarWorktreeSelection(args: {
         : new Set([activeIdentity])
     )
     setSelectionAnchorId(activeIdentity)
-  }, [activeIdentity])
+  }, [activationKey, activeIdentity])
 
   useEffect(() => {
     if (selectedWorktreeIds.size === 0) {
