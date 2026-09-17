@@ -113,9 +113,9 @@ export function useSidebarWorktreeSelection(args: {
   const activationKey = activeWorktreeId
     ? composeWorktreeHostIdentity(activeWorkspaceExecutionHostId ?? undefined, activeWorktreeId)
     : null
-  // Three facts, because no two of them can share a slot: what the store last activated,
-  // which identity was last written into the selection, and whether an activation moved
-  // without being written yet.
+  // What the store last activated, and which identity was last written into the selection.
+  // The flag is only meaningful once an identity has been adopted: it carries a move that
+  // could not be written yet, which comparing those two values cannot express.
   const observedActivation = useRef<string | null | undefined>(undefined)
   const publishedIdentity = useRef<string | null>(null)
   const moveAwaitingPublish = useRef(false)
@@ -127,8 +127,10 @@ export function useSidebarWorktreeSelection(args: {
   // Why a layout effect: an effect after paint would show the previous card's ring for a frame.
   useLayoutEffect(() => {
     // The store starts with no active workspace and hydration restores one after this hook
-    // mounts, so nothing before the first adopted identity counts as a move.
-    const inStartup = publishedIdentity.current === null && !moveAwaitingPublish.current
+    // mounts, so nothing before the first adopted identity counts as a move. No flag check
+    // here: the flag is only ever set below, under `!inStartup`, so it cannot be true while
+    // no identity has been adopted.
+    const inStartup = publishedIdentity.current === null
     const previousActivation = observedActivation.current
     observedActivation.current = activationKey
     if (!inStartup && previousActivation !== undefined && previousActivation !== activationKey) {
