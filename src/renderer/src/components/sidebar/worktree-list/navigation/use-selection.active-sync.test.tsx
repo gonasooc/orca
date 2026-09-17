@@ -32,6 +32,11 @@ function row(item: Worktree): HostSectionRow {
   }
 }
 
+function unqualifiedWorktree(id: string): Worktree {
+  // oxlint-disable-next-line typescript/consistent-type-assertions -- SAFETY: same narrow shape as worktree(), without the hostId a local row never carries.
+  return { id, repoId: 'repo' } as unknown as Worktree
+}
+
 const first = worktree('a')
 const second = worktree('b')
 const rows = [row(first), row(second)]
@@ -57,6 +62,36 @@ function Probe(props: { activeWorktreeId: string | null; hostId: ExecutionHostId
     activeWorkspaceExecutionHostId: props.hostId
   })
   return null
+}
+
+function UnqualifiedProbe(props: {
+  rows: HostSectionRow[]
+  activeWorktreeId: string | null
+  hostId: ExecutionHostId | null
+}): null {
+  selection = useSidebarWorktreeSelection({
+    sectionRows: props.rows,
+    pinnedDisplayPolicy: 'single-location',
+    activeWorktreeId: props.activeWorktreeId,
+    activeWorkspaceExecutionHostId: props.hostId
+  })
+  return null
+}
+
+function renderUnqualifiedProbe(
+  unqualifiedRows: HostSectionRow[],
+  activeWorktreeId: string | null,
+  hostId: ExecutionHostId | null
+): void {
+  act(() =>
+    root.render(
+      <UnqualifiedProbe
+        rows={unqualifiedRows}
+        activeWorktreeId={activeWorktreeId}
+        hostId={hostId}
+      />
+    )
+  )
 }
 
 function renderProbe(activeWorktreeId: string | null, hostId: ExecutionHostId | null): void {
@@ -106,6 +141,40 @@ describe('sidebar selection follows a non-gesture activation', () => {
     renderProbe('a', 'local')
 
     expect(selection.selectedWorktreeIds).toEqual(new Set(['local|a', 'local|b']))
+  })
+
+  it('publishes an identity the rendered rows actually carry', () => {
+    // Local rows carry no hostId (withRepoHostOwnership leaves them unqualified) while the
+    // store still resolves the active host to 'local'. Composing the two would publish an
+    // identity no row has, and the render-phase prune would drop the selection entirely.
+    const unqualified = unqualifiedWorktree('c')
+    const unqualifiedRows = [row(unqualified), row(unqualifiedWorktree('d'))]
+
+    renderUnqualifiedProbe(unqualifiedRows, 'c', 'local')
+    act(() => selection.updateSelectionForGesture(additiveEvent, unqualified))
+    expect(selection.selectedWorktreeIds).toEqual(new Set(['|c']))
+
+    renderUnqualifiedProbe(unqualifiedRows, 'd', 'local')
+
+    expect(selection.selectedWorktreeIds).toEqual(new Set(['|d']))
+  })
+
+  it('keeps the resolved host when rows disambiguate one id across hosts', () => {
+    // oxlint-disable-next-line typescript/consistent-type-assertions -- SAFETY: selection reads only id and hostId.
+    const onLocal = { id: 'shared', repoId: 'repo', hostId: 'local' } as unknown as Worktree
+    // oxlint-disable-next-line typescript/consistent-type-assertions -- SAFETY: selection reads only id and hostId.
+    const onRemote = { id: 'shared', repoId: 'repo', hostId: 'ssh:host-b' } as unknown as Worktree
+    const sharedRows = [
+      { ...row(onLocal), rowKey: 'row:local' },
+      { ...row(onRemote), rowKey: 'row:remote' }
+    ]
+
+    // One workspace id present on two hosts: activating the remote one must not land on the
+    // local row, so the resolved host has to survive when a row actually carries it.
+    renderUnqualifiedProbe(sharedRows, 'shared', 'local')
+    renderUnqualifiedProbe(sharedRows, 'shared', 'ssh:host-b')
+
+    expect(selection.selectedWorktreeIds).toEqual(new Set(['ssh:host-b|shared']))
   })
 
   it('resolves a host-unqualified activation through the rendered rows', () => {

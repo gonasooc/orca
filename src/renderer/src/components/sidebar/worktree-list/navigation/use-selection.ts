@@ -83,18 +83,29 @@ export function useSidebarWorktreeSelection(args: {
     }, [renderedWorktrees, selectedWorktreeIds])
   )
 
-  // Resolved the way cycling resolves it, so a host-unqualified activation lands on the
-  // same identity the rows carry.
+  // Resolved in the vocabulary the rows themselves carry, which is not always the one the
+  // store names: activation resolves a host even for a local row, while withRepoHostOwnership
+  // leaves that row unqualified. Composing the resolved host would publish an identity no row
+  // has, and the render-phase prune would then drop the selection outright.
   const activeIdentity = useMemo(() => {
     if (!activeWorktreeId) {
       return null
     }
     if (activeWorkspaceExecutionHostId) {
-      return composeWorktreeHostIdentity(activeWorkspaceExecutionHostId, activeWorktreeId)
+      // Only when a row actually carries it — that is what disambiguates one id across hosts.
+      const composed = composeWorktreeHostIdentity(activeWorkspaceExecutionHostId, activeWorktreeId)
+      if (renderedWorktreeIdentities.includes(composed)) {
+        return composed
+      }
     }
     const activeWorktree = renderedWorktrees.find((worktree) => worktree.id === activeWorktreeId)
     return activeWorktree ? getWorktreeHostIdentity(activeWorktree) : null
-  }, [activeWorktreeId, activeWorkspaceExecutionHostId, renderedWorktrees])
+  }, [
+    activeWorktreeId,
+    activeWorkspaceExecutionHostId,
+    renderedWorktreeIdentities,
+    renderedWorktrees
+  ])
 
   const lastSyncedActiveIdentity = useRef<string | null>(null)
   // Why this exists: only mouse gestures ever wrote the selection, so activating a workspace
