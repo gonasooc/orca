@@ -199,6 +199,46 @@ describe('sidebar selection follows a non-gesture activation', () => {
     expect(selection.selectedWorktreeIds).toEqual(new Set(['local|w']))
   })
 
+  it('publishes nothing when startup restores the active workspace asynchronously', () => {
+    // The store starts with activeWorktreeId null and WorktreeList mounts before hydration
+    // restores it, so the restore must read as startup rather than as a move.
+    renderProbe(null, null)
+
+    renderProbe('a', 'local')
+
+    expect(selection.selectedWorktreeIds).toEqual(new Set())
+  })
+
+  it('treats the same workspace as a move after everything was deactivated', () => {
+    const active = worktree('h')
+    const picked = worktree('v')
+    const both = [row(active), row(picked)]
+
+    renderUnqualifiedProbe(both, 'h', 'local')
+    act(() => selection.updateSelectionForGesture(additiveEvent, picked))
+    // Deactivating everything ends the current activation.
+    renderUnqualifiedProbe(both, null, null)
+
+    renderUnqualifiedProbe(both, 'h', 'local')
+
+    expect(selection.selectedWorktreeIds).toEqual(new Set(['local|h']))
+  })
+
+  it('republishes when the active row is re-qualified under an unchanged activation', () => {
+    // Discovery backfill can stamp hostId on a row, turning `|id` into `local|id` while the
+    // store's activation is unchanged. The published identity would otherwise be pruned away.
+    const unqualified = [row(unqualifiedWorktree('a')), row(unqualifiedWorktree('b'))]
+    const qualified = [row(worktree('a')), row(worktree('b'))]
+
+    renderUnqualifiedProbe(unqualified, 'a', 'local')
+    act(() => selection.updateSelectionForGesture(additiveEvent, unqualifiedWorktree('b')))
+    expect(selection.selectedWorktreeIds).toEqual(new Set(['|b']))
+
+    renderUnqualifiedProbe(qualified, 'a', 'local')
+
+    expect(selection.selectedWorktreeIds).toEqual(new Set(['local|a']))
+  })
+
   it('does not republish when a hidden row simply comes back', () => {
     // Clearing a filter or expanding a group is not an activation, so a selection the user
     // built deliberately has to survive the active row reappearing.

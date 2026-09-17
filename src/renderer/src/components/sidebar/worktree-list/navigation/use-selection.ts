@@ -113,7 +113,12 @@ export function useSidebarWorktreeSelection(args: {
   const activationKey = activeWorktreeId
     ? composeWorktreeHostIdentity(activeWorkspaceExecutionHostId ?? undefined, activeWorktreeId)
     : null
-  const publishedActivation = useRef<string | null | undefined>(undefined)
+  // `undefined` means no activation has been observed yet; `null` means the store currently
+  // has no active workspace. Those are different, and collapsing them is what makes either
+  // startup or a re-activation behave wrongly.
+  const publishedActivation = useRef<{ key: string; identity: string } | null | undefined>(
+    undefined
+  )
   // Why this exists: only mouse gestures ever wrote the selection, so activating a workspace
   // any other way (keyboard cycling, Cmd+digit, the palette, history) left the ring on the
   // card the user last clicked. A plain click activates *and* replaces the selection; every
@@ -121,19 +126,33 @@ export function useSidebarWorktreeSelection(args: {
   //
   // Why a layout effect: an effect after paint would show the previous card's ring for a frame.
   useLayoutEffect(() => {
-    if (publishedActivation.current === undefined) {
-      // Startup activates a workspace without the user picking anything, and inventing a
-      // selection there would arm Cmd+click from a card nobody touched.
-      publishedActivation.current = activationKey
+    if (activationKey === null) {
+      // Deactivating everything is not a pick, but it does end the current activation, so the
+      // next one counts as a move even if it names the same workspace. Startup's own null is
+      // left unobserved, so the restore that follows it does not.
+      if (publishedActivation.current !== undefined) {
+        publishedActivation.current = null
+      }
       return
     }
-    // An activation whose row is not rendered yet stays unpublished, so it still lands once
-    // the row appears; a row appearing on its own publishes nothing, because the key is
-    // unchanged and a filter is not an activation.
-    if (publishedActivation.current === activationKey || !activeIdentity) {
+    if (!activeIdentity) {
+      // A filter or a collapsed group is hiding the active row. Leave the activation
+      // unpublished so it still lands once the row renders.
       return
     }
-    publishedActivation.current = activationKey
+    const published = publishedActivation.current
+    if (published === undefined) {
+      // The store starts with no active workspace and hydration restores one after this hook
+      // mounts, so the first activation is startup — nobody picked it.
+      publishedActivation.current = { key: activationKey, identity: activeIdentity }
+      return
+    }
+    // The identity is compared too: discovery backfill can re-qualify a rendered row under an
+    // unchanged activation, and the published identity would otherwise be pruned and lost.
+    if (published?.key === activationKey && published.identity === activeIdentity) {
+      return
+    }
+    publishedActivation.current = { key: activationKey, identity: activeIdentity }
     // Identity-preserving when it already matches, so a plain click does not re-render twice.
     setSelectedWorktreeIds((previousSelection) =>
       previousSelection.size === 1 && previousSelection.has(activeIdentity)
