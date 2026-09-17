@@ -239,6 +239,23 @@ describe('sidebar selection follows a non-gesture activation', () => {
     expect(selection.selectedWorktreeIds).toEqual(new Set(['local|a']))
   })
 
+  it('treats a round trip through a hidden workspace as a move', () => {
+    // The palette can activate a workspace a filter is hiding. Coming back to the one before
+    // it is still two activations, so the ring must not stay where a gesture put it.
+    const origin = worktree('a')
+    const picked = worktree('v')
+    const visible = [row(origin), row(picked)]
+
+    renderUnqualifiedProbe(visible, 'a', 'local')
+    act(() => selection.updateSelectionForGesture(additiveEvent, picked))
+    // 'b' is not among the rendered rows, so its identity never resolves.
+    renderUnqualifiedProbe(visible, 'b', 'local')
+
+    renderUnqualifiedProbe(visible, 'a', 'local')
+
+    expect(selection.selectedWorktreeIds).toEqual(new Set(['local|a']))
+  })
+
   it('does not republish when a hidden row simply comes back', () => {
     // Clearing a filter or expanding a group is not an activation, so a selection the user
     // built deliberately has to survive the active row reappearing.

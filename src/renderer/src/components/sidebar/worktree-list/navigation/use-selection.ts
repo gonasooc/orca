@@ -113,12 +113,12 @@ export function useSidebarWorktreeSelection(args: {
   const activationKey = activeWorktreeId
     ? composeWorktreeHostIdentity(activeWorkspaceExecutionHostId ?? undefined, activeWorktreeId)
     : null
-  // `undefined` means no activation has been observed yet; `null` means the store currently
-  // has no active workspace. Those are different, and collapsing them is what makes either
-  // startup or a re-activation behave wrongly.
-  const publishedActivation = useRef<{ key: string; identity: string } | null | undefined>(
-    undefined
-  )
+  // Three facts, because no two of them can share a slot: what the store last activated,
+  // which identity was last written into the selection, and whether an activation moved
+  // without being written yet.
+  const observedActivation = useRef<string | null | undefined>(undefined)
+  const publishedIdentity = useRef<string | null>(null)
+  const moveAwaitingPublish = useRef(false)
   // Why this exists: only mouse gestures ever wrote the selection, so activating a workspace
   // any other way (keyboard cycling, Cmd+digit, the palette, history) left the ring on the
   // card the user last clicked. A plain click activates *and* replaces the selection; every
@@ -126,33 +126,34 @@ export function useSidebarWorktreeSelection(args: {
   //
   // Why a layout effect: an effect after paint would show the previous card's ring for a frame.
   useLayoutEffect(() => {
-    if (activationKey === null) {
-      // Deactivating everything is not a pick, but it does end the current activation, so the
-      // next one counts as a move even if it names the same workspace. Startup's own null is
-      // left unobserved, so the restore that follows it does not.
-      if (publishedActivation.current !== undefined) {
-        publishedActivation.current = null
-      }
-      return
+    // The store starts with no active workspace and hydration restores one after this hook
+    // mounts, so nothing before the first adopted identity counts as a move.
+    const inStartup = publishedIdentity.current === null && !moveAwaitingPublish.current
+    const previousActivation = observedActivation.current
+    observedActivation.current = activationKey
+    if (!inStartup && previousActivation !== undefined && previousActivation !== activationKey) {
+      // Remembered even when it cannot be published yet: a round trip through a workspace whose
+      // row is hidden ends on the identity it started from, and only this flag still knows the
+      // user moved twice.
+      moveAwaitingPublish.current = true
     }
     if (!activeIdentity) {
-      // A filter or a collapsed group is hiding the active row. Leave the activation
-      // unpublished so it still lands once the row renders.
+      // A filter or a collapsed group is hiding the active row. The move keeps waiting.
       return
     }
-    const published = publishedActivation.current
-    if (published === undefined) {
-      // The store starts with no active workspace and hydration restores one after this hook
-      // mounts, so the first activation is startup — nobody picked it.
-      publishedActivation.current = { key: activationKey, identity: activeIdentity }
+    if (inStartup) {
+      // Adopt what hydration restored without selecting it, so Cmd+click is not armed from a
+      // card nobody picked.
+      publishedIdentity.current = activeIdentity
       return
     }
     // The identity is compared too: discovery backfill can re-qualify a rendered row under an
     // unchanged activation, and the published identity would otherwise be pruned and lost.
-    if (published?.key === activationKey && published.identity === activeIdentity) {
+    if (!moveAwaitingPublish.current && publishedIdentity.current === activeIdentity) {
       return
     }
-    publishedActivation.current = { key: activationKey, identity: activeIdentity }
+    moveAwaitingPublish.current = false
+    publishedIdentity.current = activeIdentity
     // Identity-preserving when it already matches, so a plain click does not re-render twice.
     setSelectedWorktreeIds((previousSelection) =>
       previousSelection.size === 1 && previousSelection.has(activeIdentity)
